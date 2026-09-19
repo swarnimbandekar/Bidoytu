@@ -861,6 +861,7 @@ export function useWorkspace() {
             : stillRunning,
         )
       })
+    }
     if (view === 'Collaborator')
       void run(async () => {
         const result = await api.request<{
@@ -871,7 +872,7 @@ export function useWorkspace() {
         setOastInteractions(result.items)
         setOastStatus(result.status)
       })
-  }, [view, online, revision, run, intruderRunningId])
+  }, [view, online, revision, run, intruderRunningIds])
   useEffect(() => {
     if (!online || view !== 'Collaborator' || oastServers.length) return
     void run(async () => {
@@ -1278,6 +1279,26 @@ export function useWorkspace() {
     setRunSelectedIndex(null)
     setRunDetail(null)
     setShowIntruderRun(true)
+  }
+  async function cancelIntruder(tabId = activeIntruderTab) {
+    const tab = intruderTabs.find((item) => item.id === tabId)
+    if (!tab?.attackId) return
+    await run(async () => {
+      await api.request('intruder.cancel', { attack_id: tab.attackId })
+      updateIntruderTab({ runState: 'cancelled' }, tabId)
+      setIntruderRunningIds((current) => current.filter((id) => id !== tabId))
+      setState((s) => ({ ...s, job_state: 'idle' }))
+    })
+  }
+  function openIntruderResults(tabId: number) {
+    const tab = intruderTabs.find((item) => item.id === tabId)
+    if (!tab) return
+    setRunTabId(tabId)
+    setRunDetail(null)
+    setShowIntruderRun(true)
+    const first = tab.results[0]
+    setRunSelectedIndex(first?.index ?? null)
+    if (first) void selectRunResult(first)
   }
   async function registerOast() {
     if (!oastServer) {
