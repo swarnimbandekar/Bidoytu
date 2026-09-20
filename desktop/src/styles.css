@@ -1069,60 +1069,21 @@ h1 {
   overflow: hidden;
   background: var(--canvas);
 }
-.editable-code-highlight {
-  position: absolute;
-  top: 0;
-  left: 0;
-  min-width: 100%;
-  padding: 12px;
-  /* Must match .editable-code-wrap textarea EXACTLY (font, size, line-height,
-     padding) so the transparent caret sits on the same glyph the highlight
-     paints. line-height is an integer px — a unitless/fractional value drifts
-     the caret one line per few dozen lines. */
-  font: 400 12px/18px var(--mono);
-  white-space: pre;
-  pointer-events: none;
-}
-.editable-code-highlight.wrap-editor {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-.editable-code-line {
-  /* One text row = one line-height. No min-height override: forcing a height
-     that differs from the textarea's line-height is what caused caret drift. */
-  height: 18px;
-  line-height: 18px;
-}
-.editable-code-highlight.wrap-editor .editable-code-line {
-  /* Wrapped rows can span multiple line-heights; let them grow. */
-  height: auto;
-  min-height: 18px;
-}
 .editable-code-wrap textarea {
   position: relative;
   z-index: 1;
-  /* Metrics MUST match .editable-code-highlight exactly (see note there). */
+  /* A native editable control keeps pointer hit testing, selection and caret
+     placement reliable in Repeater and Intruder. */
   padding: 12px;
   font: 400 12px/18px var(--mono);
-  color: transparent;
+  color: var(--ink);
   caret-color: var(--ink);
-  background: transparent;
+  background: var(--canvas);
   text-shadow: none;
 }
 .editable-code-wrap textarea::selection {
-  color: transparent;
+  color: inherit;
   background: var(--selection);
-}
-.payload-position-highlight {
-  /* Keep the overlay exactly width-identical to the transparent textarea.
-     Padding/display changes here shift the visual text after markers and make
-     later mouse selections appear to insert at the wrong character. */
-  display: inline;
-  color: #241600;
-  background: #f6c453;
-  border-radius: 4px;
-  box-shadow: inset 0 0 0 1px rgba(151, 94, 0, 0.55), 0 0 10px rgba(246, 196, 83, 0.28);
 }
 .editor-body textarea.wrap-editor {
   white-space: pre-wrap;
@@ -3404,4 +3365,183 @@ body {
 }
 .oast-detail > *:first-child {
   border-bottom: 1px solid var(--hairline);
+}
+
+/* ---------- Compact security-workspace density ----------
+   Small, information-dense chrome inspired by professional proxy tools. Text
+   remains at a readable 12px minimum and every interactive target is >= 28px. */
+:root {
+  --r-lg: 12px;
+  --r-xl: 20px;
+}
+.app {
+  grid-template-columns: 212px minmax(0, 1fr);
+  grid-template-rows: 44px minmax(0, 1fr) 26px;
+}
+.titlebar {
+  padding-left: 14px;
+  gap: 8px;
+}
+.sidebar {
+  padding: 14px 10px 0;
+}
+.nav-label {
+  margin: 8px 10px;
+  font-size: 10px;
+}
+.tools-label,
+.sidebar-bottom {
+  margin-top: 18px;
+}
+.nav-item {
+  height: 34px;
+  padding: 0 10px;
+  gap: 9px;
+  font-size: 13px;
+}
+.button {
+  min-height: 30px;
+  padding: 5px 12px;
+  font-size: 13px;
+  gap: 6px;
+}
+.button.icon-only,
+.icon-button {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+}
+.history-workspace,
+.tool-workspace {
+  margin: 0 16px 14px;
+}
+.traffic-toolbar,
+.tool-toolbar {
+  gap: 6px;
+  padding: 5px 10px;
+  min-height: 38px;
+}
+.traffic-toolbar .button,
+.tool-toolbar .button {
+  min-height: 26px;
+  padding: 3px 9px;
+  font-size: 12px;
+}
+.traffic-toolbar .button.icon-only,
+.tool-toolbar .button.icon-only {
+  width: 26px;
+  height: 26px;
+  min-height: 26px;
+}
+.search-box,
+.traffic-toolbar .search-box {
+  height: 26px;
+  padding: 0 10px;
+  gap: 7px;
+}
+.search-box input {
+  font-size: 12px;
+}
+.traffic-row {
+  padding: 0 10px;
+  font-size: 12px;
+}
+.traffic-header {
+  height: 28px;
+}
+.inspector-bar,
+.panel-title {
+  min-height: 32px;
+  height: 32px;
+  padding: 0 10px;
+}
+.inspector-bar .button {
+  min-height: 26px;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+.inspector-bar .button.icon-only {
+  width: 26px;
+  min-height: 26px;
+}
+.editor-toolbar {
+  height: 32px;
+  padding: 0 9px;
+}
+.editor-title {
+  gap: 5px;
+  margin-right: 5px;
+  font-size: 12px;
+}
+.tab,
+.wrap-toggle {
+  font-size: 12px;
+}
+.editor-footer {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 10px;
+}
+.proxy-tabs {
+  gap: 4px;
+  padding: 4px 16px;
+}
+.proxy-tabs button {
+  height: 30px;
+  padding: 0 10px;
+  gap: 6px;
+  font-size: 12px;
+}
+.request-tabs {
+  min-height: 38px;
+  padding: 4px 6px;
+}
+.request-tab {
+  min-width: 100px;
+  max-width: 180px;
+}
+.request-tab button:first-child {
+  height: 28px;
+  padding: 0 10px;
+  gap: 6px;
+  font-size: 12px;
+}
+.settings-workspace {
+  padding: 6px 16px 16px;
+}
+.settings-card {
+  padding: 16px;
+  margin-bottom: 14px;
+}
+.settings-card h2 {
+  font-size: 16px;
+  margin-bottom: 10px;
+}
+.settings-card p,
+.finding p {
+  font-size: 13px;
+}
+.finding {
+  padding: 16px;
+  content-visibility: auto;
+  contain-intrinsic-size: 180px;
+}
+.finding h3 {
+  font-size: 16px;
+}
+.finding pre {
+  font-size: 12px;
+  padding: 9px 11px;
+}
+.statusbar {
+  padding: 0 12px;
+  gap: 9px;
+  font-size: 10px;
+}
+.oast-row {
+  height: 34px;
+  padding: 0 12px;
+  font-size: 12px;
 }

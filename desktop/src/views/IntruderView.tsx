@@ -83,7 +83,8 @@ export function IntruderView({ workspace }: { workspace: WorkspaceController }) 
     duplicateIntruderTab,
   } = workspace
   const requestRef = useRef<HTMLTextAreaElement>(null)
-  const running = workspace.intruderTab.runState === 'running' || workspace.intruderTab.runState === 'queued'
+  const running =
+    workspace.intruderTab.runState === 'running' || workspace.intruderTab.runState === 'queued'
   // Which payload set the editor is currently targeting. Sniper/battering ram
   // only have one; pitchfork/cluster bomb have one per position.
   const [activeSet, setActiveSet] = useState(0)
@@ -267,7 +268,6 @@ export function IntruderView({ workspace }: { workspace: WorkspaceController }) 
             disabled={running}
             textareaRef={requestRef}
             rawOnly
-            highlightPayloadPositions
           />
         </section>
         <section className="payload-config">
@@ -551,11 +551,11 @@ export function IntruderView({ workspace }: { workspace: WorkspaceController }) 
             {config.type === 'Null payloads' && (
               <>
                 <div className="payload-section-title">Null payloads</div>
-                  <div className="payload-field">
-                    <label>How many</label>
-                    <input
-                      type="number"
-                      min={1}
+                <div className="payload-field">
+                  <label>How many</label>
+                  <input
+                    type="number"
+                    min={1}
                     value={config.nullCount}
                     disabled={running}
                     onChange={(e) => patchConfig({ nullCount: Number(e.target.value) })}

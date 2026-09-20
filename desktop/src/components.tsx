@@ -1,6 +1,6 @@
 import { Binary, Braces, Copy, FileCode2 } from 'lucide-react'
 import { api } from './api'
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 export type ContextMenuItem = {
   label: string
@@ -109,6 +109,14 @@ export function Toggle({
 }
 type EditorView = 'pretty' | 'raw' | 'hex'
 
+// The viewer is deliberately bounded. Captured messages can be large enough to
+// make full formatting or one DOM node per byte row visibly stall the renderer.
+const EDITOR_LINE_HEIGHT = 22
+const EDITOR_OVERSCAN = 8
+const MAX_WRAPPED_LINES = 2_000
+const MAX_EDITABLE_HIGHLIGHT_LINES = 2_500
+const MAX_FORMATTED_CHARS = 512 * 1024
+
 function formatMessage(value: string): string {
   const separator = value.includes('\r\n\r\n') ? '\r\n\r\n' : '\n\n'
   const index = value.indexOf(separator)
@@ -122,6 +130,10 @@ function formatMessage(value: string): string {
 function formatPayload(value: string, contentType: string): string {
   const text = value.trim()
   if (!text) return value
+  // JSON parsing and the hand-written beautifiers duplicate their input while
+  // they work. Keep large content immediately responsive; Raw remains an
+  // exact, unmodified view.
+  if (text.length > MAX_FORMATTED_CHARS) return value
   const type = contentType.toLowerCase()
   if (type.includes('json') || /^[\[{]/.test(text)) {
     try {
@@ -241,42 +253,34 @@ function beautifyCode(value: string): string {
   return lines.join('\n')
 }
 
-function buildHexLines(value: string) {
+function buildHex(value: string) {
   const bytes = new TextEncoder().encode(value)
-  const lines: { offset: string; hex: string; ascii: string }[] = []
-  for (let index = 0; index < bytes.length; index += 16) {
-    const slice = bytes.subarray(index, index + 16)
-    const parts: string[] = []
-    for (let offset = 0; offset < 16; offset += 1) {
-      parts.push(offset < slice.length ? slice[offset].toString(16).padStart(2, '0') : '  ')
-    }
-    const hex = `${parts.slice(0, 8).join(' ')}  ${parts.slice(8).join(' ')}`
-    const ascii = Array.from(slice, (byte) =>
-      byte >= 32 && byte < 127 ? String.fromCharCode(byte) : '.',
-    ).join('')
-    lines.push({ offset: index.toString(16).padStart(8, '0'), hex, ascii })
-  }
-  return { lines, bytes: bytes.length }
+  return { bytes, lineCount: Math.ceil(bytes.length / 16) }
 }
 
-const PAYLOAD_POSITION_RE = /§[^§]*§/g
+function hexLine(bytes: Uint8Array, line: number) {
+  const start = line * 16
+  const parts: string[] = []
+  let ascii = ''
+  for (let offset = 0; offset < 16; offset += 1) {
+    const byte = bytes[start + offset]
+    parts.push(byte == null ? '  ' : byte.toString(16).padStart(2, '0'))
+    if (byte != null) ascii += byte >= 32 && byte < 127 ? String.fromCharCode(byte) : '.'
+  }
+  return {
+    offset: start.toString(16).padStart(8, '0'),
+    hex: `${parts.slice(0, 8).join(' ')}  ${parts.slice(8).join(' ')}`,
+    ascii,
+  }
+}
 
-function PayloadMarkerLine({ line }: { line: string }) {
-  const parts = line.split(PAYLOAD_POSITION_RE)
-  const matches = line.match(PAYLOAD_POSITION_RE) ?? []
-  if (!matches.length) return <>{line || ' '}</>
-  const result: ReactNode[] = []
-  parts.forEach((part, index) => {
-    if (part) result.push(<Fragment key={`text-${index}`}>{part}</Fragment>)
-    if (index < matches.length) {
-      result.push(
-        <span className="payload-position-highlight" key={`position-${index}`}>
-          {matches[index]}
-        </span>,
-      )
-    }
-  })
-  return <>{result}</>
+function copyHex(bytes: Uint8Array) {
+  const lines: string[] = []
+  for (let line = 0; line < Math.ceil(bytes.length / 16); line += 1) {
+    const value = hexLine(bytes, line)
+    lines.push(`${value.offset}  ${value.hex}  ${value.ascii}`)
+  }
+  return lines.join('\n')
 }
 
 // Renders a single line of an HTTP message with syntax coloring for the
@@ -365,7 +369,6 @@ export function Editor({
   disabled = false,
   textareaRef,
   rawOnly = false,
-  highlightPayloadPositions = false,
 }: {
   title: string
   value: string
@@ -375,7 +378,6 @@ export function Editor({
   disabled?: boolean
   textareaRef?: React.Ref<HTMLTextAreaElement>
   rawOnly?: boolean
-  highlightPayloadPositions?: boolean
 }) {
   const [view, setView] = useState<EditorView>(rawOnly ? 'raw' : 'pretty')
   const [wrap, setWrap] = useState(true)
@@ -383,23 +385,29 @@ export function Editor({
   const [copyFailed, setCopyFailed] = useState(false)
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(900)
-  const [editScroll, setEditScroll] = useState({ top: 0, left: 0 })
   const viewport = useRef<HTMLDivElement>(null)
   const prettyText = useMemo(
     () => (view === 'pretty' ? formatMessage(value) : value),
     [value, view],
   )
   const lines = useMemo(() => prettyText.split('\n'), [prettyText])
-  const hex = useMemo(() => (view === 'hex' ? buildHexLines(value) : null), [value, view])
-  const firstLine = Math.max(0, Math.floor(scrollTop / 20) - 8)
-  const windowSize = Math.ceil(viewportHeight / 20) + 16
+  const hex = useMemo(() => (view === 'hex' ? buildHex(value) : null), [value, view])
+  const firstLine = Math.max(0, Math.floor(scrollTop / EDITOR_LINE_HEIGHT) - EDITOR_OVERSCAN)
+  const windowSize = Math.ceil(viewportHeight / EDITOR_LINE_HEIGHT) + EDITOR_OVERSCAN * 2
   const visibleLines = lines.slice(firstLine, firstLine + windowSize)
-  const visibleHex = hex ? hex.lines.slice(firstLine, firstLine + windowSize) : []
+  const visibleHex = hex
+    ? Array.from(
+        { length: Math.min(windowSize, Math.max(0, hex.lineCount - firstLine)) },
+        (_, index) => hexLine(hex.bytes, firstLine + index),
+      )
+    : []
+  const virtualScrollLine = useRef(-1)
   useEffect(() => {
     if (rawOnly && view !== 'raw') setView('raw')
   }, [rawOnly, view])
   useEffect(() => {
     setScrollTop(0)
+    virtualScrollLine.current = 0
     if (viewport.current) viewport.current.scrollTop = 0
   }, [value, view])
   useEffect(() => {
@@ -411,12 +419,17 @@ export function Editor({
   }, [view, !!onChange])
   const editable = Boolean(onChange) && (view === 'pretty' || view === 'raw')
   const editorValue = view === 'pretty' ? prettyText : value
+  const canWrap = lines.length <= MAX_WRAPPED_LINES
+  const effectiveWrap = wrap && canWrap
+  const formattingSkipped = view === 'pretty' && value.length > MAX_FORMATTED_CHARS
+  const updateVirtualScroll = (nextScrollTop: number) => {
+    const line = Math.floor(nextScrollTop / EDITOR_LINE_HEIGHT)
+    if (line === virtualScrollLine.current) return
+    virtualScrollLine.current = line
+    setScrollTop(nextScrollTop)
+  }
   const copyValue =
-    view === 'hex' && hex
-      ? hex.lines.map((line) => `${line.offset}  ${line.hex}  ${line.ascii}`).join('\n')
-      : view === 'pretty'
-        ? prettyText
-        : value
+    view === 'hex' && hex ? copyHex(hex.bytes) : view === 'pretty' ? prettyText : value
   return (
     <section className="editor">
       <div className="editor-toolbar">
@@ -424,40 +437,47 @@ export function Editor({
           <FileCode2 size={14} />
           {title}
         </span>
-        {!rawOnly && <button
-          className={view === 'pretty' ? 'tab active' : 'tab'}
-          aria-pressed={view === 'pretty'}
-          onClick={() => setView('pretty')}
-        >
-          <Braces size={12} />
-          Pretty
-        </button>}
-        {!rawOnly && <button
-          className={view === 'raw' ? 'tab active' : 'tab'}
-          aria-pressed={view === 'raw'}
-          onClick={() => setView('raw')}
-        >
-          Raw
-        </button>}
-        {!rawOnly && <button
-          className={view === 'hex' ? 'tab active' : 'tab'}
-          aria-pressed={view === 'hex'}
-          onClick={() => setView('hex')}
-        >
-          <Binary size={12} />
-          Hex
-        </button>}
+        {!rawOnly && (
+          <button
+            className={view === 'pretty' ? 'tab active' : 'tab'}
+            aria-pressed={view === 'pretty'}
+            onClick={() => setView('pretty')}
+          >
+            <Braces size={12} />
+            Pretty
+          </button>
+        )}
+        {!rawOnly && (
+          <button
+            className={view === 'raw' ? 'tab active' : 'tab'}
+            aria-pressed={view === 'raw'}
+            onClick={() => setView('raw')}
+          >
+            Raw
+          </button>
+        )}
+        {!rawOnly && (
+          <button
+            className={view === 'hex' ? 'tab active' : 'tab'}
+            aria-pressed={view === 'hex'}
+            onClick={() => setView('hex')}
+          >
+            <Binary size={12} />
+            Hex
+          </button>
+        )}
         <span className="grow" />
         {hint && <small className="editor-hint">{hint}</small>}
         {actions}
         <label className="wrap-toggle">
           <input
             type="checkbox"
-            checked={wrap}
+            checked={effectiveWrap}
+            disabled={!canWrap}
             onChange={(e) => setWrap(e.target.checked)}
             aria-label={`Wrap ${title.toLowerCase()} text`}
           />
-          Wrap
+          {canWrap ? 'Wrap' : 'Wrap limited'}
         </label>
         <button
           className="icon-button"
@@ -482,34 +502,12 @@ export function Editor({
       <div className="editor-body">
         {editable ? (
           <div className="editable-code-wrap">
-            <div
-              aria-hidden="true"
-              className={wrap ? 'editable-code-highlight wrap-editor' : 'editable-code-highlight'}
-              style={{ transform: `translate(${-editScroll.left}px, ${-editScroll.top}px)` }}
-            >
-              {editorValue ? (
-                editorValue.split('\n').map((line, index) => (
-                  <div className="editable-code-line" key={index}>
-                    {highlightPayloadPositions ? (
-                      <PayloadMarkerLine line={line} />
-                    ) : (
-                      <HttpLine line={line} first={index === 0} />
-                    )}
-                  </div>
-                ))
-              ) : (
-                <span> </span>
-              )}
-            </div>
             <textarea
               ref={textareaRef}
               aria-label={`${title} editor`}
               spellCheck={false}
-              className={wrap ? 'wrap-editor' : undefined}
+              className={effectiveWrap ? 'wrap-editor' : undefined}
               value={editorValue}
-              onScroll={(e) =>
-                setEditScroll({ top: e.currentTarget.scrollTop, left: e.currentTarget.scrollLeft })
-              }
               onChange={(e) => onChange?.(e.target.value)}
               disabled={disabled}
             />
@@ -517,15 +515,21 @@ export function Editor({
         ) : view === 'hex' ? (
           <div
             ref={viewport}
-            onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+            onScroll={(e) => updateVirtualScroll(e.currentTarget.scrollTop)}
             className="code-view hex-view"
             tabIndex={0}
             role="region"
             aria-label={`${title} hex view`}
           >
             {value && hex ? (
-              <div style={{ height: hex.lines.length * 20, position: 'relative' }}>
-                <div style={{ position: 'absolute', top: firstLine * 20, minWidth: '100%' }}>
+              <div style={{ height: hex.lineCount * EDITOR_LINE_HEIGHT, position: 'relative' }}>
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: firstLine * EDITOR_LINE_HEIGHT,
+                    minWidth: '100%',
+                  }}
+                >
                   {visibleHex.map((line, index) => (
                     <div className="hex-line" key={firstLine + index}>
                       <span className="hex-offset">{line.offset}</span>
@@ -546,14 +550,14 @@ export function Editor({
         ) : (
           <div
             ref={viewport}
-            onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
-            className={wrap ? 'code-view wrap-view' : 'code-view'}
+            onScroll={(e) => updateVirtualScroll(e.currentTarget.scrollTop)}
+            className={effectiveWrap ? 'code-view wrap-view' : 'code-view'}
             tabIndex={0}
             role="region"
             aria-label={`${title} message`}
           >
             {value ? (
-              wrap ? (
+              effectiveWrap ? (
                 <div>
                   {lines.map((line, index) => (
                     <div className="code-line wrap" key={index}>
@@ -563,8 +567,14 @@ export function Editor({
                   ))}
                 </div>
               ) : (
-                <div style={{ height: lines.length * 20, position: 'relative' }}>
-                  <div style={{ position: 'absolute', top: firstLine * 20, minWidth: '100%' }}>
+                <div style={{ height: lines.length * EDITOR_LINE_HEIGHT, position: 'relative' }}>
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: firstLine * EDITOR_LINE_HEIGHT,
+                      minWidth: '100%',
+                    }}
+                  >
                     {visibleLines.map((line, index) => (
                       <div className="code-line" key={firstLine + index}>
                         <span className="line-number">{firstLine + index + 1}</span>
@@ -589,7 +599,9 @@ export function Editor({
           {editable
             ? 'Editable · UTF-8 text'
             : view === 'pretty'
-              ? 'Formatted view · original message preserved'
+              ? formattingSkipped
+                ? 'Original view · formatting skipped for performance'
+                : 'Formatted view · original message preserved'
               : view === 'hex'
                 ? 'Hex view · UTF-8 bytes'
                 : 'Read only · UTF-8 preview'}

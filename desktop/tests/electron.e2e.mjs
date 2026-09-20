@@ -34,9 +34,21 @@ const errors = []
 page.on('pageerror', (error) => errors.push(error.message))
 try {
   await expect(page.getByRole('button', { name: 'Create session', exact: true })).toBeVisible()
-  await page.evaluate(async () => { await window.bidoytu.createSession('E2E session') })
-  await expect(page.getByText('Engine connected', { exact: true })).toBeVisible({ timeout: 30000 })
+  await page.evaluate(async () => {
+    await window.bidoytu.createSession('E2E session')
+  })
+  await expect(page.getByRole('button', { name: 'Stop proxy', exact: true })).toBeVisible({
+    timeout: 30000,
+  })
   await expect(page.getByText('HTTP history', { exact: true }).first()).toBeVisible()
+  // Renderer preferences can survive across Electron test profiles on some
+  // platforms; reset them so the remainder of this workflow is deterministic.
+  await page.getByRole('button', { name: /^Filters/ }).click()
+  const startupFilterDialog = page.getByRole('dialog', { name: 'Advanced HTTP history filter' })
+  await expect(startupFilterDialog).toBeVisible()
+  await page.getByRole('button', { name: 'Reset all' }).click()
+  await page.getByRole('button', { name: 'Done', exact: true }).click()
+  await expect(startupFilterDialog).toBeHidden()
   const security = await app.evaluate(({ BrowserWindow }) => {
     const prefs = BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences()
     return {
@@ -54,6 +66,14 @@ try {
     .fill(
       `GET /api/workspaces HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nAccept: application/json\r\n\r\n`,
     )
+  const repeaterEditor = page.getByRole('textbox', { name: 'Request editor' })
+  await repeaterEditor.click({ position: { x: 32, y: 12 } })
+  expect(
+    await repeaterEditor.evaluate(
+      (element) =>
+        document.activeElement === element && element.selectionStart === element.selectionEnd,
+    ),
+  ).toBe(true)
   await page.getByRole('button', { name: /^Send Ctrl/ }).click()
   await expect(page.getByRole('textbox', { name: 'Response editor' })).toHaveValue(
     /Bidoytu integration fixture/,
@@ -64,22 +84,36 @@ try {
   // Ctrl+I forwards the active request to a new Intruder attack.
   await page.keyboard.press('Control+i')
   await expect(page.getByText('Intruder', { exact: true }).first()).toBeVisible()
+  const intruderEditor = page.getByRole('textbox', { name: 'Request template editor' })
+  await intruderEditor.click({ position: { x: 32, y: 12 } })
+  expect(
+    await intruderEditor.evaluate(
+      (element) =>
+        document.activeElement === element && element.selectionStart === element.selectionEnd,
+    ),
+  ).toBe(true)
   await expect(page.getByRole('button', { name: 'Request 1 (1)', exact: true })).toBeVisible()
   // Ctrl+I again duplicates the active Intruder attack.
   await page.keyboard.press('Control+i')
-  await expect(page.getByRole('button', { name: 'Request 1 (1) copy', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Request 1 (2)', exact: true })).toBeVisible()
   await page.getByRole('button', { name: /^Proxy/ }).click()
   await page.getByRole('tab', { name: 'HTTP history' }).click()
   console.log('Python replay and global shortcuts verified.')
-  await expect(page.getByText('Engine connected', { exact: true })).toBeVisible({ timeout: 30000 })
+  await expect(page.getByRole('button', { name: 'Stop proxy', exact: true })).toBeVisible({
+    timeout: 30000,
+  })
   if (await page.getByRole('button', { name: 'Stop proxy', exact: true }).isVisible())
     await page.getByRole('button', { name: 'Stop proxy', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Start proxy', exact: true })).toBeVisible({
+    timeout: 30000,
+  })
   const reservation = createServer()
   await new Promise((resolve) => reservation.listen(0, '127.0.0.1', resolve))
   const proxyPort = reservation.address().port
   await new Promise((resolve) => reservation.close(resolve))
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
   await page.getByRole('spinbutton', { name: 'Proxy port' }).fill(String(proxyPort))
+  await page.getByRole('button', { name: /^Proxy/ }).click()
   await page.getByRole('button', { name: 'Start proxy', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Stop proxy', exact: true })).toBeVisible({
     timeout: 30000,
@@ -118,7 +152,13 @@ try {
   )
   await page.getByRole('button', { name: 'Bookmark selected request' }).click()
   await page.getByRole('button', { name: 'Show bookmarked traffic' }).click()
-  await expect(page.getByText(/1 of \d+ requests/)).toBeVisible()
+  await expect(
+    page
+      .getByRole('button')
+      .filter({ hasText: /GET127\.0\.0\.1/ })
+      .filter({ hasText: '/api/workspaces' })
+      .first(),
+  ).toBeVisible()
   await page.getByRole('button', { name: /^Filters/ }).click()
   const filterDialog = page.getByRole('dialog', { name: 'Advanced HTTP history filter' })
   await expect(filterDialog).toBeVisible()

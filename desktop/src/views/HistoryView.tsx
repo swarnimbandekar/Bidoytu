@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import {
   ArrowRight,
   Bookmark,
@@ -69,6 +70,7 @@ export function HistoryView({ workspace }: { workspace: WorkspaceController }) {
     resize,
   } = workspace
   const ctx = useContextMenu()
+  const lastVirtualRow = useRef(-1)
   const sortHeader = (key: typeof historySort.key, label: string) => {
     const active = historySort.key === key
     const SortIcon = active ? (historySort.direction === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown
@@ -166,7 +168,15 @@ export function HistoryView({ workspace }: { workspace: WorkspaceController }) {
         <div
           className="traffic-scroll"
           ref={scrollRef}
-          onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+          onScroll={(e) => {
+            // Keep virtual scrolling local to a row boundary. Updating the
+            // workspace state for every pixel used to re-render the complete
+            // shell while users scanned history.
+            const row = Math.floor(e.currentTarget.scrollTop / 24)
+            if (row === lastVirtualRow.current) return
+            lastVirtualRow.current = row
+            setScrollTop(row * 24)
+          }}
         >
           {flows.length ? (
             <div style={{ height: flows.length * 24, position: 'relative' }}>

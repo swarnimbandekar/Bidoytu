@@ -58,7 +58,9 @@ class ApplicationService:
         # Intruder attacks are keyed by attack id so minimized tabs can keep
         # running while another tab starts an independent attack.
         self.jobs: dict[str, asyncio.Task] = {}
-        self.job_results: dict[str, list[dict]] = {}
+        # Slots are allocated by the producer and filled by concurrent workers.
+        # This preserves payload order without serialising network requests.
+        self.job_results: dict[str, list[dict | None]] = {}
         self.job_states: dict[str, str] = {}
         self.last_attack_id: str | None = None
         self.job_state = "idle"
@@ -218,6 +220,10 @@ class ApplicationService:
 
         async def produce():
             for job in iter_jobs(clean_text, markers, attack_type, sets):
+                # Reserve the result position before yielding to the bounded
+                # queue. Workers may finish out of order, but presentation and
+                # exports must always follow the generated payload sequence.
+                self.job_results[attack_id].append(None)
                 await queue.put(job)
             # Only publish sentinels after the complete job stream has been
             # queued. On cancellation the producer is cancelled directly and
@@ -236,13 +242,13 @@ class ApplicationService:
                     payload = " | ".join(payloads)
                     try:
                         result = await self.send({**params, "request": job.request_text}, "Intruder")
-                        self.job_results[attack_id].append({
+                        self.job_results[attack_id][job.index] = {
                             "index": index, "payload": payload, "payloads": payloads,
-                            **summary_from_detail(result)})
+                            **summary_from_detail(result)}
                     except Exception as exc:
-                        self.job_results[attack_id].append({
+                        self.job_results[attack_id][job.index] = {
                             "index": index, "payload": payload, "payloads": payloads,
-                            "error": str(exc)})
+                            "error": str(exc)}
                     self.changed()
                 finally:
                     queue.task_done()
@@ -424,7 +430,9 @@ class ApplicationService:
                 raise ValueError("Unknown Intruder attack")
             return {
                 "state": self.job_states[attack_id],
-                "items": list(self.job_results.get(attack_id, [])),
+                # A running job can have reserved positions not yet completed.
+                # Omit those placeholders while retaining deterministic order.
+                "items": [item for item in self.job_results.get(attack_id, []) if item is not None],
             }
         if method == "intruder.cancel":
             attack_id = str(p.get("attack_id", ""))

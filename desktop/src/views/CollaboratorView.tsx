@@ -1,14 +1,5 @@
-import { useMemo } from 'react'
-import {
-  Copy,
-  Globe2,
-  Plus,
-  Power,
-  Radar,
-  RefreshCw,
-  Server,
-  Trash2,
-} from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
+import { Copy, Globe2, Plus, Power, Radar, RefreshCw, Server, Trash2 } from 'lucide-react'
 import { api } from '../api'
 import { Button, Editor, Empty } from '../components'
 import type { WorkspaceController } from '../hooks/useWorkspace'
@@ -23,6 +14,9 @@ const PROTOCOL_LABELS: Record<string, string> = {
   ftp: 'FTP',
   ldap: 'LDAP',
 }
+
+const INTERACTION_ROW_HEIGHT = 34
+const INTERACTION_OVERSCAN = 8
 
 function protocolLabel(protocol: string) {
   return PROTOCOL_LABELS[protocol.toLowerCase()] ?? protocol.toUpperCase()
@@ -54,6 +48,8 @@ export function CollaboratorView({ workspace }: { workspace: WorkspaceController
     stopOast,
     setNotice,
   } = workspace
+  const interactionsScroll = useRef<HTMLDivElement>(null)
+  const [interactionStart, setInteractionStart] = useState(0)
 
   const active = oastStatus?.active ?? false
   const domains = oastStatus?.domains ?? []
@@ -77,6 +73,10 @@ export function CollaboratorView({ workspace }: { workspace: WorkspaceController
         (selected.smtp_from ? `SMTP from: ${selected.smtp_from}\n` : '') +
         `Time:     ${formatTime(selected.timestamp)}`
       : '')
+  const visibleInteractions = oastInteractions.slice(
+    interactionStart,
+    interactionStart + 40 + INTERACTION_OVERSCAN * 2,
+  )
 
   return (
     <div className="tool-workspace collaborator">
@@ -156,15 +156,19 @@ export function CollaboratorView({ workspace }: { workspace: WorkspaceController
         </div>
         {domains.length === 0 ? (
           <p className="oast-hint">
-            Register with an OAST server, then generate a domain and paste it into a target. Any DNS,
-            HTTP, or SMTP callback it receives shows up below.
+            Register with an OAST server, then generate a domain and paste it into a target. Any
+            DNS, HTTP, or SMTP callback it receives shows up below.
           </p>
         ) : (
           <ul className="oast-domain-list">
             {domains.map((domain) => (
               <li key={domain.id}>
                 <code>{domain.domain}</code>
-                {domain.hits > 0 && <span className="oast-hits">{domain.hits} hit{domain.hits === 1 ? '' : 's'}</span>}
+                {domain.hits > 0 && (
+                  <span className="oast-hits">
+                    {domain.hits} hit{domain.hits === 1 ? '' : 's'}
+                  </span>
+                )}
                 <button
                   className="icon-button"
                   aria-label={`Copy ${domain.domain}`}
@@ -220,28 +224,57 @@ export function CollaboratorView({ workspace }: { workspace: WorkspaceController
                 <span role="columnheader">Full ID</span>
                 <span role="columnheader">Time</span>
               </div>
-              <div className="oast-rows">
-                {oastInteractions.map((interaction) => (
-                  <button
-                    key={interaction.unique_id + interaction.timestamp}
-                    className={`oast-row ${
-                      selected && selected.unique_id === interaction.unique_id ? 'active' : ''
-                    }`}
-                    role="row"
-                    onClick={() => setOastSelected(interaction.unique_id)}
+              <div
+                className="oast-rows"
+                ref={interactionsScroll}
+                onScroll={(event) => {
+                  const first = Math.max(
+                    0,
+                    Math.floor(event.currentTarget.scrollTop / INTERACTION_ROW_HEIGHT) -
+                      INTERACTION_OVERSCAN,
+                  )
+                  setInteractionStart((current) => (current === first ? current : first))
+                }}
+              >
+                <div
+                  style={{
+                    height: oastInteractions.length * INTERACTION_ROW_HEIGHT,
+                    position: 'relative',
+                  }}
+                >
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: interactionStart * INTERACTION_ROW_HEIGHT,
+                      left: 0,
+                      right: 0,
+                    }}
                   >
-                    <span role="cell">
-                      <span className={`oast-proto proto-${interaction.protocol.toLowerCase()}`}>
-                        {protocolLabel(interaction.protocol)}
-                      </span>
-                    </span>
-                    <span role="cell">{interaction.remote_address}</span>
-                    <span role="cell" className="oast-fullid" title={interaction.full_id}>
-                      {interaction.full_id}
-                    </span>
-                    <span role="cell">{formatTime(interaction.timestamp)}</span>
-                  </button>
-                ))}
+                    {visibleInteractions.map((interaction) => (
+                      <button
+                        key={interaction.unique_id + interaction.timestamp}
+                        className={`oast-row ${
+                          selected && selected.unique_id === interaction.unique_id ? 'active' : ''
+                        }`}
+                        role="row"
+                        onClick={() => setOastSelected(interaction.unique_id)}
+                      >
+                        <span role="cell">
+                          <span
+                            className={`oast-proto proto-${interaction.protocol.toLowerCase()}`}
+                          >
+                            {protocolLabel(interaction.protocol)}
+                          </span>
+                        </span>
+                        <span role="cell">{interaction.remote_address}</span>
+                        <span role="cell" className="oast-fullid" title={interaction.full_id}>
+                          {interaction.full_id}
+                        </span>
+                        <span role="cell">{formatTime(interaction.timestamp)}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           )}
